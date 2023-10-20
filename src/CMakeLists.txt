@@ -18,7 +18,10 @@ set(SRC helpers.cc
         target.cc
         appengine.cc
         cli/cli.cc
-        api.cc)
+        api.cc
+        tuf/akhttpsreposource.cc
+        tuf/localreposource.cc
+        tuf/akrepo.cc)
 
 set(HEADERS helpers.h
         storage/stat.h
@@ -39,7 +42,11 @@ set(HEADERS helpers.h
         downloader.h
         exec.h
         cli/cli.h
-        ../include/aktualizr-lite/api.h)
+        tuf/akhttpsreposource.h
+        tuf/localreposource.h
+        tuf/akrepo.h
+        ../include/aktualizr-lite/api.h
+        ../include/aktualizr-lite/tuf/tuf.h)
 
 if (BUILD_AKLITE_WITH_NERDCTL)
   set(SRC ${SRC} containerd/client.cc containerd/engine.cc)
