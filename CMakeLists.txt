@@ -61,7 +61,7 @@ if(BUILD_AKLITE)
   if(BUILD_AKLITE_OFFLINE)
     add_subdirectory(apps/aklite-offline)
   endif(BUILD_AKLITE_OFFLINE)
-
+  add_subdirectory(apps/tufctl)
 endif(BUILD_AKLITE)
 
 # Use `-LH` options (cmake <args> -LH) to output all variables
