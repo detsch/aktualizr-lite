@@ -15,6 +15,11 @@
 class Config;
 class LiteClient;
 
+namespace Uptane {
+class Target;
+class HardwareIdentifier;
+}  // namespace Uptane
+
 /**
  * A high-level representation of a TUF Target in terms applicable to a
  * FoundriesFactory.
@@ -274,6 +279,8 @@ class AkliteClient {
    */
   CheckInResult CheckIn() const;
 
+  CheckInResult CheckInLocal(const std::string path) const;
+
   /**
    * Return the active aktualizr-lite configuration.
    */
@@ -347,6 +354,8 @@ class AkliteClient {
 
  private:
   void Init(Config &config, bool finalize = true, bool apply_lock = true);
+  std::vector<TufTarget> filterTargets(const std::vector<Uptane::Target> allTargets,
+                                       const Uptane::HardwareIdentifier hwidToFind) const;
 
   bool read_only_{false};
   std::shared_ptr<LiteClient> client_;
