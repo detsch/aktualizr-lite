@@ -313,7 +313,7 @@ class AkliteClient {
    * Create an InstallContext object to help drive an update.
    */
   std::unique_ptr<InstallContext> Installer(const TufTarget &t, std::string reason = "",
-                                            std::string correlation_id = "") const;
+                                            std::string correlation_id = "", std::string src_path = "") const;
 
   /**
    * @brief Complete a pending installation

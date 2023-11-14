@@ -2,6 +2,7 @@
 
 #include <sys/file.h>
 #include <unistd.h>
+#include <boost/process.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -14,6 +15,8 @@
 #include "target.h"
 
 #include "aktualizr-lite/tuf/tuf.h"
+#include "aktualizr-lite/tuf/tuf.h"
+#include "docker/restorableappengine.h"
 
 const std::vector<boost::filesystem::path> AkliteClient::CONFIG_DIRS = {"/usr/lib/sota/conf.d", "/var/sota/sota.toml",
                                                                         "/etc/sota/conf.d/"};
@@ -311,10 +314,252 @@ class LiteInstall : public InstallContext {
     client_->report_queue->enqueue(std::move(e));
   }
 
- private:
+ protected:
   std::shared_ptr<LiteClient> client_;
   std::unique_ptr<Uptane::Target> target_;
   std::string reason_;
+};
+
+class BaseHttpClient : public HttpInterface {
+ public:
+  HttpResponse post(const std::string&, const std::string&, const std::string&) override {
+    return HttpResponse("", 501, CURLE_OK, "");
+  }
+  HttpResponse post(const std::string&, const Json::Value&) override { return HttpResponse("", 501, CURLE_OK, ""); }
+  HttpResponse put(const std::string&, const std::string&, const std::string&) override {
+    return HttpResponse("", 501, CURLE_OK, "");
+  }
+  HttpResponse put(const std::string&, const Json::Value&) override { return HttpResponse("", 501, CURLE_OK, ""); }
+  HttpResponse download(const std::string& url, curl_write_callback write_cb, curl_xferinfo_callback progress_cb,
+                        void* userp, curl_off_t from) override {
+    return HttpResponse("", 501, CURLE_OK, "");
+  }
+  std::future<HttpResponse> downloadAsync(const std::string& url, curl_write_callback write_cb,
+                                          curl_xferinfo_callback progress_cb, void* userp, curl_off_t from,
+                                          CurlHandler* easyp) override {
+    std::promise<HttpResponse> resp_promise;
+    resp_promise.set_value(HttpResponse("", 501, CURLE_OK, ""));
+    return resp_promise.get_future();
+  }
+  void setCerts(const std::string&, CryptoSource, const std::string&, CryptoSource, const std::string&,
+                CryptoSource) override {}
+};
+
+class RegistryBasicAuthClient : public BaseHttpClient {
+ public:
+  HttpResponse get(const std::string& url, int64_t maxsize) override {
+    return HttpResponse("{\"Secret\":\"secret\",\"Username\":\"test-user\"}", 200, CURLE_OK, "");
+  }
+};
+
+class OfflineRegistry : public BaseHttpClient {
+ public:
+  OfflineRegistry(const boost::filesystem::path& root_dir, const std::string& hostname = "hub.foundries.io")
+      : hostname_{hostname}, root_dir_{root_dir} {}
+
+  HttpResponse get(const std::string& url, int64_t maxsize) override {
+    if (boost::starts_with(url, auth_endpoint_)) {
+      return HttpResponse("{\"token\":\"token\"}", 200, CURLE_OK, "");
+    }
+    return getAppItem(url);
+  }
+
+  HttpResponse download(const std::string& url, curl_write_callback write_cb, curl_xferinfo_callback progress_cb,
+                        void* userp, curl_off_t from) override {
+    const std::string hash_prefix{"sha256:"};
+    const auto digest_pos{url.rfind(hash_prefix)};
+    if (digest_pos == std::string::npos) {
+      return HttpResponse("Invalid URL", 400, CURLE_OK, "");
+    }
+    const auto hash_pos{digest_pos + hash_prefix.size()};
+    const auto hash{url.substr(hash_pos)};
+    const auto blob_path{(blobs_dir_ / hash).string()};
+
+    if (!boost::filesystem::exists(blob_path)) {
+      return HttpResponse("The app blob is missing: " + blob_path, 404, CURLE_OK, "Not found");
+    }
+
+    char buf[1024 * 4];
+    std::ifstream blob_file{blob_path};
+
+    std::streamsize read_byte_numb;
+    while (blob_file.good()) {
+      blob_file.read(buf, sizeof(buf));
+      write_cb(buf, blob_file.gcount(), 1, userp);
+    }
+    if (!blob_file.eof()) {
+      HttpResponse("Failed to read app blob data: " + blob_path, 500, CURLE_OK, "Internal Error");
+    }
+    return HttpResponse("", 200, CURLE_OK, "");
+  }
+
+  HttpResponse getAppItem(const std::string& url) const {
+    const std::string hash_prefix{"sha256:"};
+    const auto digest_pos{url.rfind(hash_prefix)};
+    if (digest_pos == std::string::npos) {
+      return HttpResponse("Invalid URL", 400, CURLE_OK, "");
+    }
+    const auto hash_pos{digest_pos + hash_prefix.size()};
+    const auto hash{url.substr(hash_pos)};
+    const auto blob_path{blobs_dir_ / hash};
+    if (!boost::filesystem::exists(blob_path)) {
+      return HttpResponse("The app blob is missing: " + blob_path.string(), 404, CURLE_OK, "Not found");
+    }
+    return HttpResponse(Utils::readFile(blobs_dir_ / hash), 200, CURLE_OK, "");
+  }
+
+  boost::filesystem::path blobsDir() const { return root_dir_ / "blobs"; }
+  const boost::filesystem::path& appsDir() const { return apps_dir_; }
+  const boost::filesystem::path& dir() const { return root_dir_; }
+
+ private:
+  const boost::filesystem::path root_dir_;
+  const std::string hostname_;
+  const std::string auth_endpoint_{"https://" + hostname_ + "/token-auth"};
+  const boost::filesystem::path apps_dir_{root_dir_ / "apps"};
+  const boost::filesystem::path blobs_dir_{root_dir_ / "blobs" / "sha256"};
+};
+
+struct UpdateSrc {
+  boost::filesystem::path TufDir;
+  boost::filesystem::path OstreeRepoDir;
+  boost::filesystem::path AppsDir;
+  std::string TargetName;
+};
+
+// enum class PostInstallAction {
+//   Undefined = -1,
+//   NeedReboot,
+//   NeedRebootForBootFw,
+//   NeedDockerRestart,
+//   AlreadyInstalled,
+//   DowngradeAttempt
+// };
+// enum class PostRunAction {
+//   Undefined = -1,
+//   Ok,
+//   OkNeedReboot,
+//   RollbackOk,
+//   RollbackNeedReboot,
+//   RollbackToUnknown,
+//   RollbackToUnknownIfAppFailed,
+//   RollbackFailed,
+//   OkNoPendingInstall,
+// };
+
+#include "composeappmanager.h"
+class LocalLiteInstall : public LiteInstall {
+ public:
+  LocalLiteInstall(std::shared_ptr<LiteClient> client, std::unique_ptr<Uptane::Target> t, std::string& reason,
+                   std::string& local_path)
+      : LiteInstall(std::move(client), std::move(t), reason) {
+    src_path_ = local_path;
+  }
+
+  std::unique_ptr<ComposeAppManager> createOfflineComposeAppManager(
+      const Config& cfg_in, const UpdateSrc& src, std::shared_ptr<HttpInterface> docker_client_http_client) {
+    Config cfg{cfg_in};  // make copy of the input config to avoid its modification by LiteClient
+
+    // turn off reporting update events to DG
+    cfg.tls.server = "";
+    // make LiteClient to pull from a local ostree repo
+    cfg.pacman.ostree_server = "file://" + src.OstreeRepoDir.string();
+
+    // Always use the compose app manager since it covers both use-cases, just ostree and ostree+apps.
+    cfg.pacman.type = ComposeAppManager::Name;
+
+    // Handle DG:/token-auth
+    std::shared_ptr<HttpInterface> registry_basic_auth_client{std::make_shared<RegistryBasicAuthClient>()};
+
+    std::shared_ptr<OfflineRegistry> offline_registry{std::make_shared<OfflineRegistry>(src.AppsDir)};
+    // Handle requests to Registry aimed to download App
+    Docker::RegistryClient::Ptr registry_client{std::make_shared<Docker::RegistryClient>(
+        registry_basic_auth_client, "",
+        [offline_registry](const std::vector<std::string>*, const std::set<std::string>*) {
+          return offline_registry;
+        })};
+
+    ComposeAppManager::Config pacman_cfg(cfg.pacman);
+    std::string compose_cmd{pacman_cfg.compose_bin.string()};
+    if (boost::filesystem::exists(pacman_cfg.compose_bin) && pacman_cfg.compose_bin.filename().compare("docker") == 0) {
+      compose_cmd = boost::filesystem::canonical(pacman_cfg.compose_bin).string() + " ";
+      // if it is a `docker` binary then turn it into ` the  `docker compose` command
+      // and make sure that the `compose` is actually supported by a given `docker` utility.
+      compose_cmd += "compose ";
+    }
+
+    std::string docker_host{"unix:///var/run/docker.sock"};
+    auto env{boost::this_process::environment()};
+    if (env.end() != env.find("DOCKER_HOST")) {
+      docker_host = env.get("DOCKER_HOST");
+    }
+
+    AppEngine::Ptr app_engine{std::make_shared<Docker::RestorableAppEngine>(
+        pacman_cfg.reset_apps_root, pacman_cfg.apps_root, pacman_cfg.images_data_root, registry_client,
+        docker_client_http_client ? std::make_shared<Docker::DockerClient>(docker_client_http_client)
+                                  : std::make_shared<Docker::DockerClient>(),
+        pacman_cfg.skopeo_bin.string(), docker_host, compose_cmd, Docker::RestorableAppEngine::GetDefStorageSpaceFunc(),
+        [offline_registry](const Docker::Uri& app_uri, const std::string& image_uri) {
+          Docker::Uri uri{Docker::Uri::parseUri(image_uri, false)};
+          return "--src-shared-blob-dir " + offline_registry->blobsDir().string() +
+                 " oci:" + offline_registry->appsDir().string() + "/" + app_uri.app + "/" + app_uri.digest.hash() +
+                 "/images/" + uri.registryHostname + "/" + uri.repo + "/" + uri.digest.hash();
+        },
+        false, /* don't create containers on install because it makes dockerd check if pinned images
+      present in its store what we should avoid until images are registered (hacked) in dockerd store */
+        true   /* indicate that this is an offline client */
+        )};
+
+    auto ostree_sysroot = std::make_shared<OSTree::Sysroot>(client_->config.pacman);
+    auto storage = INvStorage::newStorage(client_->config.storage, false, StorageClient::kTUF);
+
+    auto key_manager = std_::make_unique<KeyManager>(storage, client_->config.keymanagerConfig(), nullptr);
+    std::shared_ptr<RootfsTreeManager> basepacman = std::make_shared<ComposeAppManager>(
+        client_->config.pacman, client_->config.bootloader, storage, nullptr, ostree_sysroot, *key_manager, app_engine);
+
+    std::vector<std::string> headers;
+    // Add all required request headers to the http client and set them to default values.
+    // The current Target related headers are updated after the package manager is initialized
+    // and the current Target is determined. At this point they just set to "initial/unknown" value.
+    // We have to set all headers at this point because the http client API doesn't allow adding new
+    // headers after its initialization, headers can be only modified.
+    // initRequestHeaders(headers);
+    auto http_client = std::make_shared<HttpClientWithShare>(&headers);
+
+    return std::make_unique<ComposeAppManager>(cfg.pacman, client_->config.bootloader, storage, http_client,
+                                               ostree_sysroot, *key_manager, app_engine);
+  }
+
+  DownloadResult Download() override {
+    // ComposeAppManager cap(client_.);
+    auto reason = reason_;
+    if (reason.empty()) {
+      reason = "Update to " + target_->filename();
+    }
+
+    client_->logTarget("Downloading: ", *target_);
+
+    auto updateSrc = UpdateSrc();
+    updateSrc.AppsDir = boost::filesystem::path(src_path_) / "apps";
+    updateSrc.OstreeRepoDir = boost::filesystem::path(src_path_) / "ostree_repo";
+
+    auto cap = createOfflineComposeAppManager(client_->config, updateSrc, nullptr);
+    auto download_res{cap->Download(Target::toTufTarget(*target_))};
+    if (!download_res) {
+      return DownloadResult{download_res.status, download_res.description, download_res.destination_path};
+    }
+
+    if (client_->VerifyTarget(*target_) != TargetStatus::kGood) {
+      data::InstallationResult ires{data::ResultCode::Numeric::kVerificationFailed, "Downloaded target is invalid"};
+      client_->notifyInstallFinished(*target_, ires);
+      return DownloadResult{DownloadResult::Status::VerificationFailed, ires.description};
+    }
+
+    return DownloadResult{DownloadResult::Status::Ok, ""};
+  }
+
+ private:
+  std::string src_path_;
 };
 
 bool AkliteClient::IsInstallationInProgress() const { return client_->getPendingTarget().IsValid(); }
@@ -336,7 +581,7 @@ std::unique_ptr<InstallContext> AkliteClient::CheckAppsInSync() const {
 }
 
 std::unique_ptr<InstallContext> AkliteClient::Installer(const TufTarget& t, std::string reason,
-                                                        std::string correlation_id) const {
+                                                        std::string correlation_id, std::string src_path) const {
   if (read_only_) {
     throw std::runtime_error("Can't perform this operation from read-only mode");
   }
@@ -369,7 +614,10 @@ std::unique_ptr<InstallContext> AkliteClient::Installer(const TufTarget& t, std:
     throw std::runtime_error("Correlation ID's must be less than 64 bytes");
   }
   target->setCorrelationId(correlation_id);
-  return std::make_unique<LiteInstall>(client_, std::move(target), reason);
+  if (src_path.empty())
+    return std::make_unique<LiteInstall>(client_, std::move(target), reason);
+  else
+    return std::make_unique<LocalLiteInstall>(client_, std::move(target), reason, src_path);
 }
 
 InstallResult AkliteClient::CompleteInstallation() {
