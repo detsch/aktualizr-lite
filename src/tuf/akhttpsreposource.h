@@ -9,6 +9,7 @@ namespace tuf {
 class AkHttpsRepoSource : public RepoSource {
  public:
   AkHttpsRepoSource(std::string name_in, boost::property_tree::ptree& pt);
+  AkHttpsRepoSource(std::string name_in, boost::property_tree::ptree& pt, Config& config);
   ~AkHttpsRepoSource();
 
   virtual std::string fetchRoot(int version);
@@ -17,7 +18,7 @@ class AkHttpsRepoSource : public RepoSource {
   virtual std::string fetchTargets();
 
  private:
-  void init(std::string name_in, boost::property_tree::ptree& pt);
+  void init(std::string name_in, boost::property_tree::ptree& pt, Config& config);
   void fillConfig(Config& config, boost::property_tree::ptree& pt);
   std::string fetchRole(Uptane::Role role, int64_t maxsize, Uptane::Version version);
 

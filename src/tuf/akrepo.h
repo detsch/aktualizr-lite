@@ -16,6 +16,7 @@ class AkRepo : public TufRepo {
   AkRepo(const Config& config);
   virtual std::vector<TufTarget> GetTargets();
   virtual void updateMeta(std::shared_ptr<RepoSource> repo_src);
+  virtual void checkMeta();
 
  private:
   void init(boost::filesystem::path storage_path);

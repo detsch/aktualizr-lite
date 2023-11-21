@@ -11,7 +11,16 @@
 namespace aklite {
 namespace tuf {
 
-AkHttpsRepoSource::AkHttpsRepoSource(std::string name_in, boost::property_tree::ptree& pt) { init(name_in, pt); }
+AkHttpsRepoSource::AkHttpsRepoSource(std::string name_in, boost::property_tree::ptree& pt) {
+  boost::program_options::variables_map m;
+  Config config(m);
+  fillConfig(config, pt);
+  init(name_in, pt, config);
+}
+
+AkHttpsRepoSource::AkHttpsRepoSource(std::string name_in, boost::property_tree::ptree& pt, Config& config) {
+  init(name_in, pt, config);
+}
 
 AkHttpsRepoSource::~AkHttpsRepoSource() {
   if (!tmp_dir_path_.empty()) {
@@ -20,13 +29,8 @@ AkHttpsRepoSource::~AkHttpsRepoSource() {
   }
 }
 
-void AkHttpsRepoSource::init(std::string name_in, boost::property_tree::ptree& pt) {
+void AkHttpsRepoSource::init(std::string name_in, boost::property_tree::ptree& pt, Config& config) {
   name_ = name_in;
-
-  boost::program_options::variables_map m;
-  Config config(m);
-  fillConfig(config, pt);
-
   // Libaktualizr places certificate files inside a sqlite database
   tmp_dir_path_ = boost::filesystem::temp_directory_path() /
                   boost::filesystem::unique_path("aklite-tuf-\%\%\%\%-\%\%\%\%-\%\%\%\%-\%\%\%\%");
