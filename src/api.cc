@@ -159,13 +159,13 @@ AkliteClient::~AkliteClient() {
 
 static bool compareTargets(const TufTarget& a, const TufTarget& b) { return a.Version() < b.Version(); }
 
-// Returns a sorted list of targets matching tags if configured and hwid (or one of secondary_hwids)
+// Returns a sorted list of OSTREE targets matching tags if configured and hwid (or one of secondary_hwids)
 static std::vector<TufTarget> filterTargets(const std::vector<TufTarget>& allTargets, const std::string& hwidToFind,
                                             const std::vector<std::string>& tags,
                                             const std::vector<std::string>& secondary_hwids) {
   std::vector<TufTarget> targets;
   for (const auto& t : allTargets) {
-    if (!tags.empty() && !t.HasOneOfTags(tags)) {
+    if (!tags.empty() && !t.HasOneOfTags(tags) && !t.HasOneOfTags(tags) && t.Custom()["targetFormat"] != "OSTREE") {
       continue;
     }
     if (t.HardwareId() == hwidToFind) {
