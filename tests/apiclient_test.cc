@@ -166,8 +166,8 @@ TEST_F(ApiClientTest, CheckInLocal) {
   ASSERT_EQ("", getDeviceGateway().readSotaToml());
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
   ASSERT_EQ(2, result.Targets().size());
-  ASSERT_EQ(new_target.filename(), result.GetLatest().Name());
-  ASSERT_EQ(new_target.sha256Hash(), result.GetLatest().Sha256Hash());
+  ASSERT_EQ(new_target.filename(), result.SelectTarget().Name());
+  ASSERT_EQ(new_target.sha256Hash(), result.SelectTarget().Sha256Hash());
 }
 
 TEST_F(ApiClientTest, CheckInWithoutTargetImport) {
@@ -207,7 +207,7 @@ TEST_F(ApiClientTest, Rollback) {
   AkliteClient client(liteclient);
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
-  ASSERT_FALSE(client.IsRollback(result.GetLatest()));
+  ASSERT_FALSE(client.IsRollback(result.SelectTarget()));
 
   // deploy the initial version/commit to emulate rollback
   getSysRepo().deploy(getInitialTarget().sha256Hash());
@@ -217,7 +217,7 @@ TEST_F(ApiClientTest, Rollback) {
   // hence we need to re-create an instance of AkliteClient
   AkliteClient rebooted_client(liteclient);
 
-  ASSERT_TRUE(rebooted_client.IsRollback(result.GetLatest()));
+  ASSERT_TRUE(rebooted_client.IsRollback(result.SelectTarget()));
   ASSERT_EQ(rebooted_client.GetCurrent().Sha256Hash(), getInitialTarget().sha256Hash());
 }
 
@@ -232,7 +232,7 @@ TEST_F(ApiClientTest, Install) {
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-  auto latest = result.GetLatest();
+  auto latest = result.SelectTarget();
 
   auto installer = client.Installer(latest);
   ASSERT_NE(nullptr, installer);
@@ -254,7 +254,7 @@ TEST_F(ApiClientTest, InstallWithCorrelationId) {
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-  auto latest = result.GetLatest();
+  auto latest = result.SelectTarget();
 
   resetEvents();
 
@@ -292,7 +292,7 @@ TEST_F(ApiClientTest, InstallModeOstreeOnlyIfOstreeAndApps) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
     auto installer = client.Installer(latest, "", "", InstallMode::OstreeOnly);
     ASSERT_NE(nullptr, installer);
     auto dresult = installer->Download();
@@ -325,7 +325,7 @@ TEST_F(ApiClientTest, InstallModeOstreeOnlyIfJustApps) {
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-  auto latest = result.GetLatest();
+  auto latest = result.SelectTarget();
   auto installer = client.Installer(latest, "", "", InstallMode::OstreeOnly);
   ASSERT_NE(nullptr, installer);
   auto dresult = installer->Download();
@@ -353,7 +353,7 @@ TEST_F(ApiClientTest, InstallWithoutDownload) {
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-  auto latest = result.GetLatest();
+  auto latest = result.SelectTarget();
 
   auto installer = client.Installer(latest);
   ASSERT_NE(nullptr, installer);
@@ -383,7 +383,7 @@ TEST_F(ApiClientTest, InstallDownloadInSeparateInstances) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
     auto installer = client.Installer(latest);
     ASSERT_NE(nullptr, installer);
     auto dresult = installer->Download();
@@ -397,7 +397,7 @@ TEST_F(ApiClientTest, InstallDownloadInSeparateInstances) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
     auto installer = client.Installer(latest);
     ASSERT_NE(nullptr, installer);
     auto iresult = installer->Install();
@@ -415,7 +415,7 @@ TEST_F(ApiClientTest, InstallDownloadInSeparateInstances) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
     auto installer = client.Installer(latest);
     ASSERT_NE(nullptr, installer);
     auto dresult = installer->Download();
@@ -429,7 +429,7 @@ TEST_F(ApiClientTest, InstallDownloadInSeparateInstances) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
     auto installer = client.Installer(latest);
     ASSERT_NE(nullptr, installer);
     auto iresult = installer->Install();
@@ -455,8 +455,8 @@ TEST_F(ApiClientTest, Secondaries) {
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
   ASSERT_EQ(2, result.Targets().size());
-  ASSERT_EQ(new_target.filename(), result.GetLatest().Name());
-  ASSERT_EQ(secondary_target.filename(), result.GetLatest("riscv").Name());
+  ASSERT_EQ(new_target.filename(), result.SelectTarget().Name());
+  ASSERT_EQ(secondary_target.filename(), result.SelectTarget(-1, "", "riscv").Name());
 }
 
 TEST_F(ApiClientTest, SwitchTag) {
@@ -479,7 +479,7 @@ TEST_F(ApiClientTest, SwitchTag) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
 
     auto installer = client.Installer(latest);
     ASSERT_NE(nullptr, installer);
@@ -515,7 +515,7 @@ TEST_F(ApiClientTest, SwitchTag) {
     auto result = client.CheckIn();
     ASSERT_EQ(CheckInResult::Status::Ok, result.status);
 
-    auto latest = result.GetLatest();
+    auto latest = result.SelectTarget();
     // make sure the latest matches the latest from the tag repo, i.e. the tag target
     ASSERT_EQ(latest.Name(), tag_target.filename());
     ASSERT_EQ(latest.Sha256Hash(), tag_target.sha256Hash());
@@ -559,7 +559,7 @@ TEST_F(ApiClientTest, InstallTargetWithHackedOstree) {
 
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
-  auto latest = result.GetLatest();
+  auto latest = result.SelectTarget();
   ASSERT_EQ(latest.Name(), malicious_target.Name());
   auto installer = client.Installer(malicious_target);
   ASSERT_EQ(nullptr, installer);
@@ -580,7 +580,7 @@ TEST_F(ApiClientTest, InstallTargetWithHackedApps) {
 
   auto result = client.CheckIn();
   ASSERT_EQ(CheckInResult::Status::Ok, result.status);
-  auto latest = result.GetLatest();
+  auto latest = result.SelectTarget();
   ASSERT_EQ(latest.Name(), malicious_target.Name());
   auto installer = client.Installer(malicious_target, "", "", InstallMode::OstreeOnly);
   ASSERT_EQ(nullptr, installer);

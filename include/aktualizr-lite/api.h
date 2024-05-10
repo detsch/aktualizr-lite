@@ -43,7 +43,7 @@ class CheckInResult {
    * If no hwid is specified, this method will return the latest target for
    * the primary.
    */
-  TufTarget GetLatest(std::string hwid = "") const;
+  TufTarget SelectTarget(int version = -1, const std::string &target_name = "", std::string hwid = "") const;
 
   // NOLINTNEXTLINE(hicpp-explicit-conversions,google-explicit-constructor)
   operator bool() const { return status == CheckInResult::Status::Ok || status == CheckInResult::Status::OkCached; }
