@@ -98,7 +98,7 @@ int cmd_daemon(std::string local_repo_path) {
         continue;  // There's no point trying to look for an update
       }
 
-      auto latest = res.GetLatest();
+      auto latest = res.SelectTarget();
       if (client->IsRollback(latest)) {
         LOG_INFO << "Latest Target is marked for causing a rollback and won't be installed: " << latest.Name();
       } else {
