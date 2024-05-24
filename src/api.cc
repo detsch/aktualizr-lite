@@ -472,7 +472,6 @@ std::vector<TufTarget> toTufTargets(const std::vector<Uptane::Target>& targets) 
 }
 
 CheckInResult AkliteClient::CheckInLocal(const LocalUpdateSource* local_update_source) const {
-  client_->notifyTufUpdateStarted();
   auto repo_src =
       std::make_shared<aklite::tuf::LocalRepoSource>("temp-local-repo-source", local_update_source->tuf_repo);
 
@@ -534,7 +533,6 @@ CheckInResult AkliteClient::CheckInLocal(const LocalUpdateSource* local_update_s
     return CheckInResult(CheckInResult::Status::NoTargetContent, hw_id_, std::vector<TufTarget>{});
   }
 
-  client_->notifyTufUpdateFinished();
   return CheckInResult(CheckInResult::Status::Ok, hw_id_, toTufTargets(available_targets));
 }
 
