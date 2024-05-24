@@ -49,6 +49,9 @@ class CheckInResult {
   // NOLINTNEXTLINE(hicpp-explicit-conversions,google-explicit-constructor)
   operator bool() const { return status == CheckInResult::Status::Ok || status == CheckInResult::Status::OkCached; }
 
+  TufTarget selected_target = TufTarget();
+  std::string reason;
+
  private:
   std::string primary_hwid_;
   std::vector<TufTarget> targets_;
@@ -245,6 +248,9 @@ class AkliteClient {
    * apps.
    */
   std::unique_ptr<InstallContext> CheckAppsInSync() const;
+
+  CheckInResult GetTargetToInstall(const LocalUpdateSource *local_update_source, int version,
+                                   const std::string &target_name, const TufTarget &current, bool force) const;
 
   /**
    * Performs a "check-in" with the device-gateway. A check-in consists of:
