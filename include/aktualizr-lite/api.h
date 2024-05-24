@@ -71,6 +71,12 @@ class InstallResult {
     Failed,
     DownloadFailed,
 
+    VerificationFailed,
+    DownloadFailed_NoSpace,
+    InstallationInProgress,
+    InstallRollbackFailed,
+    InstallRollbackOk,
+    UnknownError,
   };
   Status status;
   std::string description;
@@ -352,6 +358,12 @@ class AkliteClient {
    */
   static const std::vector<boost::filesystem::path> CONFIG_DIRS;
 
+  InstallResult PullAndInstall(const TufTarget &target, const std::string &reason, const std::string &correlation_id,
+                               InstallMode install_mode, const LocalUpdateSource *local_update_source, bool do_download,
+                               bool do_install);
+
+  bool RebootIfRequired(InstallResult install_result);
+
  private:
   void Init(Config &config, bool finalize = true, bool apply_lock = true);
 
@@ -361,6 +373,12 @@ class AkliteClient {
   std::string hw_id_;
   std::vector<std::string> secondary_hwids_;
   mutable bool configUploaded_{false};
+
+  struct NoSpaceDownloadState {
+    std::string ostree_commit_hash;
+    std::string cor_id;
+    storage::Volume::UsageInfo stat;
+  } state_when_download_failed{"", "", {.err = "undefined"}};
 };
 
 #endif  // AKTUALIZR_LITE_API_H_
