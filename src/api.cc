@@ -2,6 +2,7 @@
 
 #include <sys/file.h>
 #include <unistd.h>
+#include <boost/format.hpp>
 #include <boost/process.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -169,8 +170,119 @@ static std::vector<TufTarget> filterTargets(const std::vector<TufTarget>& allTar
   return targets;
 }
 
-CheckInResult AkliteClient::CheckIn() const {
+// TODO: Reuse this
+static Uptane::Target toUptaneTarget(const TufTarget& t) {
+  Json::Value target_json;
+  target_json["hashes"]["sha256"] = t.Sha256Hash();
+  target_json["custom"]["targetFormat"] = "OSTREE";
+  target_json["length"] = 0;
+  Uptane::Target target(t.Name(), target_json);
+  return target;
+}
+
+// Returns the target that should be installed, if any.
+// It might be an updated version, a rollback target, or even the currently installed target, in case we need to sync
+// apps
+CheckInResult AkliteClient::GetTargetToInstall(const LocalUpdateSource* local_update_source, int version,
+                                               const std::string& target_name, const TufTarget& current,
+                                               bool force) const {
+  client_->setAppsNotChecked();
   client_->notifyTufUpdateStarted();
+  bool rollback_operation = false;
+
+  CheckInResult res = local_update_source == nullptr ? CheckIn() : CheckInLocal(local_update_source);
+
+  if (res.status != CheckInResult::Status::Ok && res.status != CheckInResult::Status::OkCached) {
+    LOG_WARNING << "Unable to update latest metadata";
+    return res;
+  }
+
+  auto candidate_target = res.SelectTarget(version, target_name);
+
+  if (IsRollback(current) && current.Name() == candidate_target.Name()) {
+    // Handle the case when Apps failed to start on boot just after an update.
+    // This is only possible with `pacman.create_containers_before_reboot = 0`.
+    LOG_INFO << "The currently booted Target is a failing Target, finding Target to rollback to...";
+    const TufTarget rollback_target = Target::toTufTarget(client_->getRollbackTarget());
+    if (rollback_target.IsUnknown()) {
+      const auto err{boost::str(boost::format("Failed to find Target to rollback to after a failure to start "
+                                              "Apps at boot on a new version of sysroot;"
+                                              " failing current Target: %s, hash: %s") %
+                                current.Name() % current.Sha256Hash())};
+
+      LOG_ERROR << err;
+      res.status = CheckInResult::Status::Failed;  // TODO: Specify proper error status
+      res.selected_target = TufTarget();
+      client_->notifyTufUpdateFinished(err);
+      return res;
+    }
+    candidate_target = rollback_target;
+    rollback_operation = true;
+    LOG_INFO << "Found Target to rollback to: " << rollback_target.Name() << ", hash: " << rollback_target.Sha256Hash();
+  }
+
+  // This is a workaround for finding and avoiding bad updates after a rollback.
+  // Rollback sets the installed version state to none instead of broken, so there is no
+  // easy way to find just the bad versions without api/storage changes. As a workaround we
+  // just check if the version is not current nor pending nor known (old hash) and never been successfully
+  // installed, if so then skip an update to the such version/Target
+  auto is_bad_target = IsRollback(candidate_target);
+  // Extra state validation
+  if (rollback_operation && is_bad_target) {
+    // We should never get here: when a rollback initiated required, a bad target should never be selected
+    const auto err{
+        boost::str(boost::format("A bad target (%s) was selected for rollback of %s. This should not happen") %
+                   candidate_target.Name() % current.Name())};
+    LOG_ERROR << err;
+    res.selected_target = TufTarget();
+    res.status = CheckInResult::Status::Failed;
+    client_->notifyTufUpdateFinished(err);
+    return res;
+  }
+
+  if (candidate_target.Name() != current.Name() && (!is_bad_target || force)) {
+    if (!rollback_operation && !is_bad_target) {
+      LOG_INFO << "Found new and valid Target to update to: " << candidate_target.Name()
+               << ", sha256: " << candidate_target.Sha256Hash();
+    } else if (is_bad_target) {
+      // force is true at this point
+      LOG_INFO << candidate_target.Name()
+               << " target is marked for causing a rollback, but installation will be forced ";
+    }
+    // We should install this target:
+    res.selected_target = candidate_target;
+    res.reason = std::string(rollback_operation ? "Rolling back" : "Updating") + " from " + current.Name() + " to " +
+                 res.selected_target.Name();
+
+  } else {
+    if (is_bad_target) {
+      LOG_INFO << "Target: " << candidate_target.Name() << " is a failing Target (aka known locally)."
+               << " Skipping its installation.";
+    }
+
+    auto current_target = std::make_unique<Uptane::Target>(client_->getCurrent());
+    if (!client_->appsInSync(*current_target)) {
+      // Force installation of apps
+      res.selected_target = Target::toTufTarget(*current_target);
+      LOG_INFO
+          << "The specified Target is already installed, enforcing installation to make sure it's synced and running:"
+          << res.selected_target.Name();
+
+      res.reason = "Syncing Active Target Apps";
+    } else {
+      // No targets to install
+      res.selected_target = TufTarget();
+      LOG_INFO << "Device is up-to-date";
+    }
+    client_->setAppsNotChecked();
+  }
+
+  client_->notifyTufUpdateFinished("", toUptaneTarget(candidate_target));
+
+  return res;
+}
+
+CheckInResult AkliteClient::CheckIn() const {
   if (!configUploaded_) {
     client_->reportAktualizrConfiguration();
     configUploaded_ = true;

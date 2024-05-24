@@ -88,63 +88,44 @@ static StatusCode pullAndInstall(AkliteClient &client, int version, const std::s
   }
 
   const auto current{client.GetCurrent()};
-  CheckInResult cr{CheckInResult::Status::Failed, "", std::vector<TufTarget>{}};
-  if (local_update_source == nullptr) {
-    cr = client.CheckIn();
-  } else {
-    cr = client.CheckInLocal(local_update_source);
-  }
-  if (!cr) {
+  auto cr = client.GetTargetToInstall(local_update_source, version, target_name, current, force_downgrade);
+
+  //
+  if (cr.selected_target.IsUnknown()) {
+    if (cr.status == CheckInResult::Status::NoMatchingTargets) {
+      std::string target_string;
+      if (version == -1 && target_name.empty()) {
+        target_string = " version: latest,";
+      } else {
+        if (!target_name.empty()) {
+          target_string = " name: " + target_name + ",";
+        }
+        if (version != -1) {
+          target_string += " version: " + std::to_string(version) + ",";
+        }
+      }
+
+      LOG_ERROR << "No Target found;" << target_string
+                << " hardware ID: " << client.GetConfig().get("provision.primary_ecu_hardware_id", "")
+                << ", tag: " << client.GetConfig().get("pacman.tags", "");
+    } else if (cr) {
+      LOG_INFO << "No target to update";
+    }
     return res2StatusCode<CheckInResult::Status>(c2s, cr.status);
   }
 
-  auto target = cr.SelectTarget(version, target_name);
-  if (target.IsUnknown()) {
-    std::string target_string;
-    if (version == -1 && target_name.empty()) {
-      target_string = " version: latest,";
-    } else {
-      if (!target_name.empty()) {
-        target_string = " name: " + target_name + ",";
-      }
-      if (version != -1) {
-        target_string += " version: " + std::to_string(version) + ",";
-      }
-    }
-
-    LOG_ERROR << "No Target found;" << target_string
-              << " hardware ID: " << client.GetConfig().get("provision.primary_ecu_hardware_id", "")
-              << ", tag: " << client.GetConfig().get("pacman.tags", "");
-    return StatusCode::TufTargetNotFound;
-  }
-
-  if (current.Version() > target.Version()) {
+  if (current.Version() > cr.selected_target.Version()) {
     LOG_WARNING << "Found TUF Target is lower version than the current on; "
-                << "current: " << current.Version() << ", found Target: " << target.Version();
+                << "current: " << current.Version() << ", found Target: " << cr.selected_target.Version();
 
     if (!force_downgrade) {
       LOG_ERROR << "Downgrade is not allowed by default, re-run the command with `--force` option to force downgrade";
       return StatusCode::InstallDowngradeAttempt;
     }
-    LOG_WARNING << "Downgrading from " << current.Version() << " to  " << target.Version() << "...";
+    LOG_WARNING << "Downgrading from " << current.Version() << " to  " << cr.selected_target.Version() << "...";
   }
 
-  // Check whether the given target is already installed and synced/running
-  if (current == target && client.CheckAppsInSync() == nullptr) {
-    if (local_update_source != nullptr) {
-      return StatusCode::InstallAlreadyInstalled;
-    } else {
-      LOG_INFO
-          << "The specified Target is already installed, enforcing installation to make sure it's synced and running: "
-          << target.Name();
-    }
-  } else {
-    // Run the target installation
-    LOG_INFO << "Updating Active Target: " << current.Name();
-    LOG_INFO << "To New Target: " << target.Name();
-  }
-
-  const auto installer = client.Installer(target, "", "", install_mode, local_update_source);
+  const auto installer = client.Installer(cr.selected_target, "", "", install_mode, local_update_source);
   if (installer == nullptr) {
     LOG_ERROR << "Unexpected error: installer couldn't find Target in the DB; try again later";
     return StatusCode::UnknownError;
@@ -153,7 +134,7 @@ static StatusCode pullAndInstall(AkliteClient &client, int version, const std::s
   if (pull_mode == PullMode::All) {
     auto dr = installer->Download();
     if (!dr) {
-      LOG_ERROR << "Failed to download Target; target: " << target.Name() << ", err: " << dr;
+      LOG_ERROR << "Failed to download Target; target: " << cr.selected_target.Name() << ", err: " << dr;
       return res2StatusCode<DownloadResult::Status>(d2s, dr.status);
     }
 
@@ -164,7 +145,7 @@ static StatusCode pullAndInstall(AkliteClient &client, int version, const std::s
 
   auto ir = installer->Install();
   if (!ir) {
-    LOG_ERROR << "Failed to install Target; target: " << target.Name() << ", err: " << ir;
+    LOG_ERROR << "Failed to install Target; target: " << cr.selected_target.Name() << ", err: " << ir;
     if (ir.status == InstallResult::Status::Failed) {
       LOG_INFO << "Rolling back to the previous target: " << current.Name() << "...";
       const auto installer = client.Installer(current);
