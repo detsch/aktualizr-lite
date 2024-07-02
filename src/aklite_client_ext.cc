@@ -11,6 +11,7 @@
 #include "http/httpclient.h"
 #include "libaktualizr/config.h"
 #include "liteclient.h"
+#include "logging/logging.h"
 #include "primary/reportqueue.h"
 
 #include "aktualizr-lite/tuf/tuf.h"
@@ -26,25 +27,25 @@
 // Returns the target that should be installed, if any.
 // It might be an updated version, a rollback target, or even the currently installed target, in case we need to sync
 // apps
-GetTargetToInstallResult AkliteClientExt::GetTargetToInstall(const LocalUpdateSource* local_update_source, int version,
+GetTargetToInstallResult AkliteClientExt::GetTargetToInstall(const CheckInResult& check_in_result, int version,
                                                              const std::string& target_name, bool allow_bad_target,
-                                                             bool force_apps_sync) {
-  // Tell CheckIn and CheckInLocal methods to not call notifyTufUpdateFinished in case of success
-  usingUpdateClientApi = true;
+                                                             bool force_apps_sync, bool is_offline_mode) {
+  std::string err;
+  if (!check_in_result) {
+    err = "Can't select target to install using a failed check in result";
+    LOG_WARNING << err << " " << static_cast<int>(check_in_result.status);
+    return {GetTargetToInstallResult::Status::Failed, TufTarget(), err};
+  }
+
   client_->setAppsNotChecked();
   bool rollback_operation = false;
 
-  CheckInResult checkin_res = local_update_source == nullptr ? CheckIn() : CheckInLocal(local_update_source);
-
-  if (!checkin_res) {
-    LOG_WARNING << "Unable to update latest metadata";
-    return GetTargetToInstallResult(checkin_res);
-  }
-
-  auto candidate_target = checkin_res.SelectTarget(version, target_name);
+  auto candidate_target = check_in_result.SelectTarget(version, target_name);
   if (candidate_target.IsUnknown()) {
-    std::string err = "No matching target";
-    client_->notifyTufUpdateFinished(err);
+    err = "No matching target";
+    if (!invoke_post_cb_at_checkin_) {
+      client_->notifyTufUpdateFinished(err);
+    }
     LOG_WARNING << err;
     return {GetTargetToInstallResult::Status::TufTargetNotFound, TufTarget(), err};
   }
@@ -62,7 +63,9 @@ GetTargetToInstallResult AkliteClientExt::GetTargetToInstall(const LocalUpdateSo
                                 current.Name() % current.Sha256Hash())};
 
       LOG_ERROR << err;
-      client_->notifyTufUpdateFinished(err);
+      if (!invoke_post_cb_at_checkin_) {
+        client_->notifyTufUpdateFinished(err);
+      }
       return {GetTargetToInstallResult::Status::RollbackTargetNotFound, TufTarget(), err};
     }
     candidate_target = rollback_target;
@@ -83,7 +86,9 @@ GetTargetToInstallResult AkliteClientExt::GetTargetToInstall(const LocalUpdateSo
         boost::str(boost::format("A bad target (%s) was selected for rollback of %s. This should not happen") %
                    candidate_target.Name() % current.Name())};
     LOG_ERROR << err;
-    client_->notifyTufUpdateFinished(err);
+    if (!invoke_post_cb_at_checkin_) {
+      client_->notifyTufUpdateFinished(err);
+    }
     return {GetTargetToInstallResult::Status::Failed, TufTarget(), err};
   }
 
@@ -121,7 +126,7 @@ GetTargetToInstallResult AkliteClientExt::GetTargetToInstall(const LocalUpdateSo
     } else {
       // No targets to install
       res.selected_target = TufTarget();
-      if (local_update_source == nullptr) {
+      if (!is_offline_mode) {
         // Online mode
         LOG_INFO << "Device is up-to-date";
       } else {
@@ -133,7 +138,9 @@ GetTargetToInstallResult AkliteClientExt::GetTargetToInstall(const LocalUpdateSo
     client_->setAppsNotChecked();
   }
 
-  client_->notifyTufUpdateFinished("", Target::fromTufTarget(candidate_target));
+  if (!invoke_post_cb_at_checkin_) {
+    client_->notifyTufUpdateFinished("", Target::fromTufTarget(candidate_target));
+  }
 
   return res;
 }

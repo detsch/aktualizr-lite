@@ -66,6 +66,7 @@ TEST_P(CliClient, FullUpdate) {
   auto akclient{createAkClient()};
   const auto target01{createTufTarget()};
 
+  ASSERT_EQ(cli::CheckIn(*akclient, nullptr), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::InstallNeedsReboot);
   ASSERT_EQ(cli::CompleteInstall(*akclient), cli::StatusCode::InstallNeedsReboot);
   reboot(akclient);
@@ -78,6 +79,7 @@ TEST_P(CliClient, AppOnlyUpdate_01) {
   auto akclient{createAkClient()};
   const auto target01 = createTufTarget(nullptr, "", true);
 
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version(), "", InstallMode::OstreeOnly),
             cli::StatusCode::InstallAppsNeedFinalization);
   ASSERT_TRUE(akclient->IsInstallationInProgress());
@@ -88,6 +90,7 @@ TEST_P(CliClient, AppOnlyUpdate_01) {
 TEST_P(CliClient, AppOnlyUpdate_02) {
   auto akclient{createAkClient()};
   const auto target01 = createTufTarget(nullptr, "", true);
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version(), "", InstallMode::All), cli::StatusCode::Ok);
 }
 
@@ -96,7 +99,7 @@ TEST_P(CliClient, NoMatchingTufTargets_Tag) {
   auto akclient{createAkClient()};
   const auto target01{createTufTarget()};
 
-  ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::CheckinNoMatchingTargets);
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::CheckinNoMatchingTargets);
 }
 
 TEST_P(CliClient, NoMatchingTufTargets_HardwareId) {
@@ -104,7 +107,7 @@ TEST_P(CliClient, NoMatchingTufTargets_HardwareId) {
   auto akclient{createAkClient()};
   const auto target01{createTufTarget()};
 
-  ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::CheckinNoMatchingTargets);
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::CheckinNoMatchingTargets);
 }
 
 TEST_P(CliClient, TufMetaDownloadFailure) {
@@ -113,7 +116,7 @@ TEST_P(CliClient, TufMetaDownloadFailure) {
   auto akclient{createAkClient()};
   const auto target01{createTufTarget()};
 
-  ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::CheckinMetadataFetchFailure);
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::CheckinMetadataFetchFailure);
 }
 
 TEST_P(CliClient, TufTargetNotFoundInvalidHardwareId) {
@@ -123,6 +126,7 @@ TEST_P(CliClient, TufTargetNotFoundInvalidHardwareId) {
   // the checkin is successful.
   // However, the specified target to install `target01` is not among the valid TUF targets,
   // so the install gets TufTargetNotFound.
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::TufTargetNotFound);
 }
 
@@ -134,6 +138,7 @@ TEST_P(CliClient, TufTargetNotFoundInvalidVersion) {
   // the checkin is successful.
   // However, the specified target to install, target v100, is not among the valid TUF targets,
   // so the install gets TufTargetNotFound.
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, 100), cli::StatusCode::TufTargetNotFound);
 }
 
@@ -143,6 +148,7 @@ TEST_P(CliClient, OstreeDownloadFailure) {
   auto akclient{createAkClient()};
   const auto target01{createTufTarget()};
 
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::DownloadFailure);
 }
 
@@ -152,6 +158,7 @@ TEST_P(CliClient, AppDownloadFailure) {
   auto akclient{createAkClient()};
   const auto target01{createTufTarget(&app01)};
 
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::DownloadFailure);
 }
 
@@ -161,6 +168,7 @@ TEST_P(CliClient, UpdateIfBootFwUpdateRequiresReboot) {
 
   // make the client think that there is pending boot fw update that requires reboot to be confirmed
   boot_flag_mgr_->set("bootupgrade_available");
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::InstallNeedsRebootForBootFw);
   // make sure that the installation hasn't happened
   ASSERT_FALSE(akclient->IsInstallationInProgress());
@@ -185,6 +193,7 @@ TEST_P(CliClient, AppUpdateRollback) {
                                    Docker::ComposeAppEngine::ComposeFile, "compose-start-failure"));
   const auto target01 = createTufTarget(&app01, "", true);
 
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::InstallRollbackOk);
   ASSERT_EQ(akclient->GetCurrent(), initial_target);
   ASSERT_TRUE(akclient->CheckAppsInSync() == nullptr);
@@ -195,12 +204,14 @@ TEST_P(CliClient, OstreeUpdateRollback) {
 
   // do initial to update to run some Apps
   const auto target01 = createTufTarget(nullptr, "", true);
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::Ok);
   ASSERT_EQ(akclient->GetCurrent(), target01);
 
   auto app01_updated = registry.addApp(fixtures::ComposeApp::create("app-01", "service-01", "image-02"));
   auto target02 = createTufTarget(&app01_updated);
 
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target02.Version()), cli::StatusCode::InstallNeedsReboot);
   // deploy the previous version/commit to emulate the bootloader driven rollback
   getSysRepo().deploy(target01.Sha256Hash());
@@ -217,6 +228,7 @@ TEST_P(CliClient, FullUpdateAppDrivenRollback) {
 
   // do initial to update to run some Apps
   const auto target01 = createTufTarget(nullptr, "", true);
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::Ok);
   ASSERT_EQ(akclient->GetCurrent(), target01);
 
@@ -228,6 +240,7 @@ TEST_P(CliClient, FullUpdateAppDrivenRollback) {
                                    Docker::ComposeAppEngine::ComposeFile, "compose-start-failure"));
   const auto target02 = createTufTarget(&app01);
 
+  ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
   ASSERT_EQ(cli::Install(*akclient, target02.Version()), cli::StatusCode::InstallNeedsReboot);
   reboot(akclient);
   ASSERT_EQ(cli::CompleteInstall(*akclient), cli::StatusCode::InstallRollbackNeedsReboot);
@@ -244,6 +257,7 @@ TEST_P(CliClient, OstreeRollbackToInitialTarget) {
     auto initial_target{akclient->GetCurrent()};
     auto target01 = createTufTarget();
 
+    ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
     ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::InstallNeedsReboot);
     // deploy the previous version/commit to emulate rollback
     getSysRepo().deploy(initial_target.Sha256Hash());
@@ -264,6 +278,7 @@ TEST_P(CliClient, AppRollbackToInitialTarget) {
                                      Docker::ComposeAppEngine::ComposeFile, "compose-start-failure"));
     auto target01 = createTufTarget(&app01, "", true);
 
+    ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
     ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::InstallRollbackOk);
     ASSERT_EQ(akclient->GetCurrent(), initial_target);
     ASSERT_TRUE(akclient->IsRollback(target01));
@@ -282,6 +297,7 @@ TEST_P(CliClient, OstreeAndAppRollbackToInitialTarget) {
                                      Docker::ComposeAppEngine::ComposeFile, "compose-start-failure"));
     auto target01 = createTufTarget(&app01);
 
+    ASSERT_EQ(cli::CheckIn(*akclient), cli::StatusCode::Ok);
     ASSERT_EQ(cli::Install(*akclient, target01.Version()), cli::StatusCode::InstallNeedsReboot);
     reboot(akclient);
     ASSERT_EQ(cli::CompleteInstall(*akclient), cli::StatusCode::InstallRollbackNeedsReboot);

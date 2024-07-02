@@ -1,4 +1,5 @@
 #include <sys/file.h>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -20,6 +21,7 @@
 #include "helpers.h"
 #include "http/httpclient.h"
 #include "libaktualizr/config.h"
+#include "logging/logging.h"
 #include "storage/invstorage.h"
 #include "target.h"
 #include "utilities/aktualizr_version.h"
@@ -65,13 +67,17 @@ static int status_main(LiteClient& client, const bpo::variables_map& unused) {
   return 0;
 }
 
-static int list_main(LiteClient& client, const bpo::variables_map& unused) {
-  (void)unused;
+static int checkin(LiteClient& client) {
   std::shared_ptr<LiteClient> client_ptr{&client, [](LiteClient* /*unused*/) {}};
   AkliteClient akclient(client_ptr, false, true);
 
-  auto status = aklite::cli::CheckIn(akclient, nullptr);
+  auto status = aklite::cli::CheckIn(akclient);
   return aklite::cli::IsSuccessCode(status) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+static int list_main(LiteClient& client, const bpo::variables_map& unused) {
+  (void)unused;
+  return checkin(client);
 }
 
 static int daemon_main(LiteClient& client, const bpo::variables_map& variables_map) {
@@ -94,7 +100,7 @@ static void get_target_id(const bpo::variables_map& params, int& version, std::s
       version = std::stoi(version_str);
     } catch (const std::invalid_argument& exc) {
       LOG_DEBUG << "Failed to convert the input target version to integer, consider it as a name of Target: "
-               << exc.what();
+                << exc.what();
       name = version_str;
     }
   }
@@ -125,8 +131,11 @@ static int install(LiteClient& client, const bpo::variables_map& params, aklite:
   return static_cast<int>(aklite::cli::Install(akclient, version, target_name, mode, true, nullptr, pull_mode));
 }
 
-// Pull and Install
+// CheckIn, Pull and Install
 static int cli_update(LiteClient& client, const bpo::variables_map& params) {
+  if (checkin(client) != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
   return install(client, params, aklite::cli::PullMode::All);
 }
 

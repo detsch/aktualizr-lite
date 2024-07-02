@@ -121,11 +121,12 @@ static StatusCode pullAndInstall(AkliteClientExt &client, int version, const std
     return StatusCode::InstallationInProgress;
   }
 
-  auto cr = client.GetTargetToInstall(local_update_source, version, target_name, true, true);
+  auto csm_res = client.CheckStoredMetadata(local_update_source);
+  auto gti_res = client.GetTargetToInstall(csm_res, version, target_name, true, true, local_update_source != nullptr);
 
   //
-  if (cr.selected_target.IsUnknown()) {
-    if (cr.status == GetTargetToInstallResult::Status::NoMatchingTargets) {
+  if (gti_res.selected_target.IsUnknown()) {
+    if (gti_res.status == GetTargetToInstallResult::Status::NoMatchingTargets) {
       std::string target_string;
       if (version == -1 && target_name.empty()) {
         target_string = " version: latest,";
@@ -141,27 +142,27 @@ static StatusCode pullAndInstall(AkliteClientExt &client, int version, const std
       LOG_ERROR << "No Target found;" << target_string
                 << " hardware ID: " << client.GetConfig().get("provision.primary_ecu_hardware_id", "")
                 << ", tag: " << client.GetConfig().get("pacman.tags", "");
-    } else if (cr) {
+    } else if (gti_res) {
       LOG_INFO << "No target to update";
     }
-    return res2StatusCode<GetTargetToInstallResult::Status>(t2s, cr.status);
+    return res2StatusCode<GetTargetToInstallResult::Status>(t2s, gti_res.status);
   }
 
   const auto current{client.GetCurrent()};
-  if (current.Version() > cr.selected_target.Version()) {
+  if (current.Version() > gti_res.selected_target.Version()) {
     LOG_WARNING << "Found TUF Target is lower version than the current on; "
-                << "current: " << current.Version() << ", found Target: " << cr.selected_target.Version();
+                << "current: " << current.Version() << ", found Target: " << gti_res.selected_target.Version();
 
     if (!force_downgrade) {
       LOG_ERROR << "Downgrade is not allowed by default, re-run the command with `--force` option to force downgrade";
       return StatusCode::InstallDowngradeAttempt;
     }
-    LOG_WARNING << "Downgrading from " << current.Version() << " to  " << cr.selected_target.Version() << "...";
+    LOG_WARNING << "Downgrading from " << current.Version() << " to  " << gti_res.selected_target.Version() << "...";
   }
 
-  auto ir = client.PullAndInstall(cr.selected_target, "", "", install_mode, local_update_source,
-                                  pull_mode == PullMode::All, do_install);
-  return res2StatusCode<InstallResult::Status>(i2s, ir.status);
+  auto pi_res = client.PullAndInstall(gti_res.selected_target, "", "", install_mode, local_update_source,
+                                      pull_mode == PullMode::All, do_install);
+  return res2StatusCode<InstallResult::Status>(i2s, pi_res.status);
 }
 
 StatusCode Pull(AkliteClientExt &client, int version, const std::string &target_name, bool force_downgrade,

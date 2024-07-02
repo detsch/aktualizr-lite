@@ -64,9 +64,21 @@ class AkliteClientExt : public AkliteClient {
   } state_when_download_failed{"", "", {.err = "undefined"}};
 
  public:
-  GetTargetToInstallResult GetTargetToInstall(const LocalUpdateSource *local_update_source = nullptr, int version = -1,
+  explicit AkliteClientExt(std::shared_ptr<LiteClient> client, bool read_only = false, bool apply_lock = false,
+                           bool invoke_post_cb_at_checkin = true)
+      : AkliteClient(std::move(client), read_only, apply_lock) {
+    invoke_post_cb_at_checkin_ = invoke_post_cb_at_checkin;
+  }
+
+  explicit AkliteClientExt(const boost::program_options::variables_map &cmdline_args, bool read_only = false,
+                           bool finalize = true, bool invoke_post_cb_at_checkin = true)
+      : AkliteClient(cmdline_args, read_only, finalize) {
+    invoke_post_cb_at_checkin_ = invoke_post_cb_at_checkin;
+  }
+
+  GetTargetToInstallResult GetTargetToInstall(const CheckInResult &check_in_result, int version = -1,
                                               const std::string &target_name = "", bool allow_bad_target = false,
-                                              bool force_apps_sync = false);
+                                              bool force_apps_sync = false, bool offline_mode = false);
   InstallResult PullAndInstall(const TufTarget &target, const std::string &reason = "",
                                const std::string &correlation_id = "", InstallMode install_mode = InstallMode::All,
                                const LocalUpdateSource *local_update_source = nullptr, bool do_download = true,

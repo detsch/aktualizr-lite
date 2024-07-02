@@ -4,6 +4,7 @@
 #include <boost/process.hpp>
 #include <fstream>
 
+#include "aktualizr-lite/api.h"
 #include "test_utils.h"
 #include "uptane_generator/image_repo.h"
 
@@ -218,6 +219,10 @@ class AkliteOffline : public ::testing::Test {
   aklite::cli::StatusCode install() {
     auto liteClient = createLiteClient();
     AkliteClientExt client(liteClient);
+    auto ci_status = aklite::cli::CheckIn(client, src());
+    if (!aklite::cli::IsSuccessCode(ci_status)) {
+      return ci_status;
+    }
     return aklite::cli::Install(client, -1, "", InstallMode::OstreeOnly, false, src());
   }
 
@@ -436,8 +441,6 @@ TEST_F(AkliteOffline, OfflineClientInvalidBundleMeta) {
   ASSERT_EQ(CheckInResult::Status::BundleMetadataError, cr.status);
 
   ASSERT_EQ(aklite::cli::StatusCode::CheckinInvalidBundleMetadata, aklite::cli::CheckIn(client, src()));
-  ASSERT_EQ(aklite::cli::StatusCode::CheckinInvalidBundleMetadata,
-            aklite::cli::Install(client, -1, "", InstallMode::All, false, src()));
 }
 
 TEST_F(AkliteOffline, OfflineClientCheckinSecurityError) {
@@ -521,6 +524,7 @@ TEST_F(AkliteOffline, OfflineClient) {
     EXPECT_CALL(*lite_cli, callback(testing::StrEq("install-pre"), testing::_, testing::StrEq(""))).Times(1);
     EXPECT_CALL(*lite_cli, callback(testing::StrEq("install-post"), testing::_, testing::StrEq("NEEDS_COMPLETION")))
         .Times(1);
+    ASSERT_EQ(aklite::cli::CheckIn(client, src()), aklite::cli::StatusCode::Ok);
     ASSERT_EQ(aklite::cli::StatusCode::InstallNeedsReboot,
               aklite::cli::Install(client, -1, "", InstallMode::OstreeOnly, false, src()));
     reboot();
