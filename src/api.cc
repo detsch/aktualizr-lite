@@ -261,6 +261,7 @@ CheckInResult AkliteClient::CheckIn() const {
     check_status = CheckInResult::Status::Failed;
   }
   if (check_status != CheckInResult::Status::Ok) {
+    LOG_WARNING << err_msg;
     LOG_INFO << "Checking the local TUF repo...";
     try {
       tuf_repo_->CheckMeta();
