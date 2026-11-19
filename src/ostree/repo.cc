@@ -94,7 +94,20 @@ void Repo::pull(const std::string& remote_name, const std::string& branch, const
   g_autoptr(GVariant) pull_options = nullptr;
   g_autoptr(GError) error = nullptr;
 
+  // ostree treats objects pulled from a local (file://) repository as trusted
+  // and skips verifying the checksum of each imported file object. The commit
+  // is still bound to signed TUF metadata, but the bytes behind a file object
+  // on the (offline) source media are not, so a tampered object would be
+  // installed unnoticed. Force every object to be verified for a local source.
+  g_autofree char* remote_url = nullptr;
+  if (ostree_repo_remote_get_url(repo_, remote_name.c_str(), &remote_url, nullptr) != 0 && remote_url != nullptr &&
+      g_str_has_prefix(remote_url, "file://")) {
+    pull_flags = OSTREE_REPO_PULL_FLAGS_UNTRUSTED;
+  }
+
   g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+
+  g_variant_builder_add(&builder, "{s@v}", "flags", g_variant_new_variant(g_variant_new_int32(pull_flags)));
 
   g_variant_builder_add(
       &builder, "{s@v}", "refs",
